@@ -1,0 +1,16 @@
+{
+  "name": "test01",
+  "version": "1.0.0",
+  "description": "",
+  "main": "init.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^0.20.0",
+    "chokidar": "^3.4.2",
+    "stompit": "^1.0.0"
+  }
+}
