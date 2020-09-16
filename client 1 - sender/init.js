@@ -8,44 +8,51 @@ const directoryPath = path.join(__dirname, '../_in');
 const nodiniteUrl = "http://localhost/Nodinite/Test/LogAPI/api/LogEvent";
 const logAgentValueId = 100;
 
-var watcher = chokidar.watch(directoryPath, {ignored: /^\./, persistent: true, awaitWriteFinish: true, cwd: directoryPath});
+var watcher = chokidar.watch(directoryPath, {ignored: /^\./, persistent: true, awaitWriteFinish: true, cwd: directoryPath, depth: 0});
 
 watcher
   .on('add', function(path) {
     if (!path.startsWith('_')) {
-
-      if (path.endsWith(".json")) {
-        readAndLogToNodinite(path, 0, "");
-      }
-      else {
-        readAndLogToNodinite(path, -1, "Not a JSON file");
-      }
-
+      readAndLogToNodinite(path);
     }
-    
   })
-  // .on('change', function(path) {console.log('File', path, 'has been changed');})
-  // .on('unlink', function(path) {console.log('File', path, 'has been removed');})
   .on('error', function(error) {console.error('Error happened', error);})
-
-// 1. listen to folder
-// 2. if file has been created
-// 2a. if file JSON : log message to Nodinite, connect to artemis and send file
-// 2b. if file XML : log error message to Nodinite
 
 function readAndLogToNodinite(file, errorCode, errorMsg) {
   var pathToFile = path.join(directoryPath, file);
+  var correlationId = Date.now().toString();
 
   fs.readFile(pathToFile, 'utf8', function (err,data) {
     if (err) {
       return console.log(err);
     }
     
-    logToNodinite(file, data, errorCode, errorMsg);
+    if (pathToFile.endsWith(".json")) {
+      logToNodinite(file, data, correlationId,0, "", function(file) {
+        try {
+          fs.unlinkSync(path.join(directoryPath, file));
+
+          sendToQueue(data, correlationId);
+          //file removed
+        } catch(err) {
+          console.error(err)
+        }
+      });
+    }
+    else {
+      logToNodinite(file, data, correlationId, 0, "NOT A JSON FILE", function(file) {
+        try {
+          fs.unlinkSync(path.join(directoryPath, file));
+          //file removed
+        } catch(err) {
+          console.error(err)
+        }
+      });
+    }
   });
 }
 
-function logToNodinite(filename, body, errorCode, errorMsg) {
+function logToNodinite(file, body, correlationId, errorCode, errorMsg, callback) {
   
   var logEvent = {
     "LogAgentValueId": logAgentValueId,
@@ -57,29 +64,31 @@ function logToNodinite(filename, body, errorCode, errorMsg) {
     "LogStatus": errorCode,
     "LogText": errorMsg,
     "LogDateTime": new Date().toISOString(),
-    "Body": Buffer.from(body).toString('base64')
+    "Body": Buffer.from(body).toString('base64'),
+    "Context": {
+      "Filename": file,
+      "Path": directoryPath,
+      "CorrelationId": correlationId
+    }
   };
 
   axios
     .post(nodiniteUrl, logEvent)
     .then(res => {
-      console.log(`statusCode: ${res.statusCode}`)
-      console.log(res)
+      callback(file);
     })
     .catch(error => {
       console.error(error)
     });
-    
+
 }
 
-function readFromQueue() {
-  stompit.connect({ host: 'localhost', port: 61613 }, (err, client) => {
-    frame = client.send({ destination: 'SampleQueue' })
+function sendToQueue(data, correlationId) {
+  stompit.connect({ host: 'localhost', port: 61613 }, (error, client) => {
+    frame = client.send({ destination: 'SampleQueue', correlationId: correlationId });  
+    frame.write(data);
+    frame.end();
   
-    frame.write('Simples Assim')
-  
-    frame.end()
-  
-    client.disconnect()
+    client.disconnect();
   });
 }
